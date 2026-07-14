@@ -35,15 +35,10 @@
 #include "hal/i2c_types.h"
 #include "sensirion_common.h"
 #include "sensirion_config.h"
-#include "driver/i2c.h"
+#include "i2c_bus.h"
+#include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
-
-#define I2C_MASTER_TX_BUF_DISABLE 0
-#define I2C_MASTER_RX_BUF_DISABLE 0
-#define I2C_NO_ACK_CHECK 0
-#define I2C_ACK_CHECK 1
-#define I2C_ACK_VAL 0
-#define I2C_NACK_VAL 1
+#include "freertos/task.h"
 
 /**
  * Select the current i2c bus by index.
@@ -64,26 +59,14 @@ int16_t sensirion_i2c_hal_select_bus(uint8_t bus_idx) {
  * communication.
  */
 int16_t sensirion_i2c_hal_init(int gpio_sda, int gpio_scl) {
-    /* TODO: Handle returned esp_err_t*/
-    int16_t err = 0;
-    i2c_config_t i2c_config = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = gpio_sda,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_io_num = gpio_scl,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_FREQ
-    };
-    err = i2c_param_config(I2C_PORT, &i2c_config);
-    if(err) return err;
-    return i2c_driver_install(I2C_PORT, I2C_MODE_MASTER, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
+    return (int16_t)i2c_bus_init(gpio_sda, gpio_scl);
 }
 
 /**
  * Release all resources initialized by sensirion_i2c_hal_init().
  */
 int16_t sensirion_i2c_hal_free(void) {
-    return i2c_driver_delete(I2C_PORT);
+    return 0;
 }
 
 /**
@@ -97,7 +80,10 @@ int16_t sensirion_i2c_hal_free(void) {
  * @returns 0 on success, error code otherwise
  */
 int16_t sensirion_i2c_hal_read(uint8_t address, uint8_t* data, uint16_t count) {
-    return i2c_master_read_from_device(I2C_PORT, address, data, count, 1000 / portTICK_RATE_MS);
+    i2c_master_dev_handle_t dev = i2c_bus_get_dev(address, I2C_FREQ);
+    if (!dev) return -1;
+    esp_err_t err = i2c_master_receive(dev, data, count, 1000);
+    return (int16_t)err;
 }
 
 /**
@@ -112,7 +98,10 @@ int16_t sensirion_i2c_hal_read(uint8_t address, uint8_t* data, uint16_t count) {
  * @returns 0 on success, error code otherwise
  */
 int16_t sensirion_i2c_hal_write(uint8_t address, const uint8_t* data, uint16_t count) {
-    return i2c_master_write_to_device(I2C_PORT, address, data, count, 1000 / portTICK_RATE_MS);
+    i2c_master_dev_handle_t dev = i2c_bus_get_dev(address, I2C_FREQ);
+    if (!dev) return -1;
+    esp_err_t err = i2c_master_transmit(dev, data, count, 1000);
+    return (int16_t)err;
 }
 
 /**
@@ -124,10 +113,9 @@ int16_t sensirion_i2c_hal_write(uint8_t address, const uint8_t* data, uint16_t c
  * @param useconds the sleep time in microseconds
  */
 void sensirion_i2c_hal_sleep_usec(uint32_t useconds) {
-    /* TODO: Check if this actually works */
     uint32_t msec = useconds / 1000;
     if (useconds % 1000 > 0) {
         msec++;
     }
-    vTaskDelay(msec / portTICK_RATE_MS);
+    vTaskDelay(pdMS_TO_TICKS(msec));
 }
